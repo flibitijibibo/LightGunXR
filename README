@@ -1,0 +1,27 @@
+This is Light Gun XR, a Light Gun Simulator for OpenXR and uinput.
+
+Project Website: https://github.com/flibitijibibo/LightGunXR
+
+License
+-------
+Light Gun XR is released under the zlib license. See LICENSE for details.
+
+About Light Gun XR
+------------------
+Light Gun XR exists to serve two purposes. The first is to make light gun
+games playable on PC via VR controllers, and the second is to give the author
+a place to research XR as part of the development of SDL_ActionSet:
+
+https://github.com/libsdl-org/SDL/issues/4464
+
+TL;DR: This is a fun toy project to help justify VR's immense cost of entry.
+
+Dependencies
+------------
+Light Gun XR depends on libc, OpenXR, and the uinput Linux kernel module.
+
+Found an issue?
+---------------
+Issues and patches can be reported via GitHub:
+
+https://github.com/flibitijibibo/LightGunXR/issues

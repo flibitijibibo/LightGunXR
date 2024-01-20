@@ -35,6 +35,10 @@
 #include <stdio.h> /* printf */
 #include <string.h> /* strncpy */
 #include <unistd.h> /* usleep */
+#include <time.h> /* clock_gettime */
+
+#define XR_USE_TIMESPEC
+#include <openxr/openxr_platform.h> /* xrConvertTimespecTimeToTimeKHR */
 
 int main(int argc, char **argv)
 {
@@ -49,6 +53,7 @@ int main(int argc, char **argv)
 		pause = 0,
 		kickback = 0;
 	XrSession session = 0;
+	XrSpace baseSpace = 0, aimSpace = 0;
 
 	/* Error handling */
 
@@ -58,7 +63,12 @@ int main(int argc, char **argv)
 	/* Instance creation */
 
 	XrInstanceCreateInfo instanceCreateInfo;
-	const char *extension = XR_MND_HEADLESS_EXTENSION_NAME;
+	const char *extensions[] =
+	{
+		XR_MND_HEADLESS_EXTENSION_NAME,
+		XR_KHR_CONVERT_TIMESPEC_TIME_EXTENSION_NAME
+	};
+	PFN_xrConvertTimespecTimeToTimeKHR pxrConvertTimespecTimeToTimeKHR;
 
 	instanceCreateInfo.type = XR_TYPE_INSTANCE_CREATE_INFO;
 	instanceCreateInfo.next = NULL;
@@ -70,8 +80,8 @@ int main(int argc, char **argv)
 	instanceCreateInfo.applicationInfo.apiVersion = XR_MAKE_VERSION(1, 0, 0);
 	instanceCreateInfo.enabledApiLayerCount = 0;
 	instanceCreateInfo.enabledApiLayerNames = NULL;
-	instanceCreateInfo.enabledExtensionCount = 1;
-	instanceCreateInfo.enabledExtensionNames = &extension;
+	instanceCreateInfo.enabledExtensionCount = 2;
+	instanceCreateInfo.enabledExtensionNames = extensions;
 
 	res = xrCreateInstance(&instanceCreateInfo, &instance);
 	if (res != XR_SUCCESS)
@@ -99,8 +109,6 @@ int main(int argc, char **argv)
 
 	/* Error handling */
 
-	int returnCode = -1;
-
 	#define CHECK_ERROR(name) \
 		if (res != XR_SUCCESS) \
 		{ \
@@ -109,9 +117,20 @@ int main(int argc, char **argv)
 			goto cleanup; \
 		}
 
+	/* Extensions */
+
+	int returnCode = -2;
+
+	res = xrGetInstanceProcAddr(
+		instance,
+		"xrConvertTimespecTimeToTimeKHR",
+		(PFN_xrVoidFunction*) &pxrConvertTimespecTimeToTimeKHR
+	);
+	CHECK_ERROR(xrGetInstanceProcAddr)
+
 	/* Action set */
 
-	returnCode = -2;
+	returnCode = -3;
 
 	XrActionSetCreateInfo actionsetCreateInfo;
 	XrActionCreateInfo actionCreateInfo;
@@ -146,6 +165,8 @@ int main(int argc, char **argv)
 	#undef SETUP_ACTION
 
 	/* Bind to Valve Index */
+
+	returnCode = -4;
 
 	XrPath indexPath;
 	XrActionSuggestedBinding indexBindings[6];
@@ -189,7 +210,7 @@ int main(int argc, char **argv)
 
 	/* Session creation */
 
-	returnCode = -3;
+	returnCode = -5;
 
 	XrSystemId systemID;
 	XrSystemGetInfo systemGetInfo;
@@ -219,9 +240,46 @@ int main(int argc, char **argv)
 	res = xrAttachSessionActionSets(session, &attachInfo);
 	CHECK_ERROR(xrAttachSessionActionSets)
 
+	/* Set up position/rotation tracking */
+
+	returnCode = -6;
+
+	XrReferenceSpaceCreateInfo baseSpaceCreateInfo;
+	XrActionSpaceCreateInfo spaceCreateInfo;
+
+	baseSpaceCreateInfo.type = XR_TYPE_REFERENCE_SPACE_CREATE_INFO;
+	baseSpaceCreateInfo.next = NULL;
+	baseSpaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE;
+	baseSpaceCreateInfo.poseInReferenceSpace.orientation.x = 0;
+	baseSpaceCreateInfo.poseInReferenceSpace.orientation.y = 0;
+	baseSpaceCreateInfo.poseInReferenceSpace.orientation.z = 0;
+	baseSpaceCreateInfo.poseInReferenceSpace.orientation.w = 1;
+	baseSpaceCreateInfo.poseInReferenceSpace.position.x = 0;
+	baseSpaceCreateInfo.poseInReferenceSpace.position.y = 0;
+	baseSpaceCreateInfo.poseInReferenceSpace.position.z = 0;
+
+	res = xrCreateReferenceSpace(session, &baseSpaceCreateInfo, &baseSpace);
+	CHECK_ERROR(xrCreateReferenceSpace)
+
+
+	spaceCreateInfo.type = XR_TYPE_ACTION_SPACE_CREATE_INFO;
+	spaceCreateInfo.next = NULL;
+	spaceCreateInfo.action = aim;
+	spaceCreateInfo.subactionPath = XR_NULL_PATH;
+	spaceCreateInfo.poseInActionSpace.orientation.x = 0;
+	spaceCreateInfo.poseInActionSpace.orientation.y = 0;
+	spaceCreateInfo.poseInActionSpace.orientation.z = 0;
+	spaceCreateInfo.poseInActionSpace.orientation.w = 1;
+	spaceCreateInfo.poseInActionSpace.position.x = 0;
+	spaceCreateInfo.poseInActionSpace.position.y = 0;
+	spaceCreateInfo.poseInActionSpace.position.z = 0;
+
+	res = xrCreateActionSpace(session, &spaceCreateInfo, &aimSpace);
+	CHECK_ERROR(xrCreateActionSpace)
+
 	/* Wait for the signal to begin the session */
 
-	returnCode = -4;
+	returnCode = -7;
 
 	XrEventDataBuffer eventData;
 	XrSessionBeginInfo beginInfo;
@@ -244,7 +302,7 @@ int main(int argc, char **argv)
 
 	/* Action polling, finally. */
 
-	returnCode = -5;
+	returnCode = -8;
 
 	int run = 1;
 	XrActiveActionSet activeSet;
@@ -268,12 +326,23 @@ int main(int argc, char **argv)
 		res = xrSyncActions(session, &syncInfo);
 		if (res == XR_SUCCESS)
 		{
-			XrActionStatePose aimState;
+			struct timespec clock;
+			XrTime time;
+			XrSpaceLocation aimState;
 			XrActionStateBoolean fireState, pedalState, pauseState;
 
-			getInfo.action = aim;
-			res = xrGetActionStatePose(session, &getInfo, &aimState);
-			CHECK_ERROR(xrGetActionStatePose)
+			clock_gettime(CLOCK_MONOTONIC, &clock);
+			res = pxrConvertTimespecTimeToTimeKHR(
+				instance,
+				&clock,
+				&time
+			);
+			CHECK_ERROR(xrConvertTimespecTimeToTimeKHR)
+
+			aimState.type = XR_TYPE_SPACE_LOCATION;
+			aimState.next = NULL;
+			res = xrLocateSpace(aimSpace, baseSpace, time, &aimState);
+			CHECK_ERROR(xrLocateSpace)
 
 			getInfo.action = fire;
 			res = xrGetActionStateBoolean(session, &getInfo, &fireState);
@@ -294,10 +363,18 @@ int main(int argc, char **argv)
 #if 0
 			printf(
 				"State:\n"
-				"\tAim: TODO\n"
+				"\tAim Position: (%.9f, %.9f, %.9f)\n"
+				"\tAim Orientation: (%.9f, %.9f, %.9f, %.9f)\n"
 				"\tFire: %d\n"
 				"\tPedal: %d\n"
 				"\tPause: %d\n",
+				aimState.pose.position.x,
+				aimState.pose.position.y,
+				aimState.pose.position.z,
+				aimState.pose.orientation.x,
+				aimState.pose.orientation.y,
+				aimState.pose.orientation.z,
+				aimState.pose.orientation.w,
 				fireState.currentState,
 				pedalState.currentState,
 				pauseState.currentState
@@ -321,6 +398,8 @@ int main(int argc, char **argv)
 	/* Clean up. We out. */
 	returnCode = 0;
 cleanup:
+	xrDestroySpace(aimSpace);
+	xrDestroySpace(baseSpace);
 	xrEndSession(session);
 	xrDestroySession(session);
 	xrDestroyAction(aim);

@@ -304,6 +304,14 @@ int main(int argc, char **argv)
 
 	returnCode = -8;
 
+	enum
+	{
+		RECORDING_TOPLEFT,
+		RECORDING_BOTTOMRIGHT,
+		PLAYING
+	} state = RECORDING_TOPLEFT;
+	XrVector3f topleft, bottomright;
+
 	int run = 1;
 	XrActiveActionSet activeSet;
 	XrActionsSyncInfo syncInfo;
@@ -321,6 +329,7 @@ int main(int argc, char **argv)
 	getInfo.next = NULL;
 	getInfo.subactionPath = XR_NULL_PATH;
 
+	printf("Light Gun XR has started!\n");
 	while (run)
 	{
 		res = xrSyncActions(session, &syncInfo);
@@ -356,30 +365,101 @@ int main(int argc, char **argv)
 			res = xrGetActionStateBoolean(session, &getInfo, &pauseState);
 			CHECK_ERROR(xrGetActionStateBoolean)
 
-			/* TODO: Haptic output */
+			if (state == RECORDING_TOPLEFT)
+			{
+				if (fireState.currentState && fireState.changedSinceLastSync)
+				{
+					topleft = aimState.pose.position;
+					state = RECORDING_BOTTOMRIGHT;
+					printf(
+						"Top left is (%.9f, %.9f, %.9f)\n",
+						topleft.x,
+						topleft.y,
+						topleft.z
+					);
+				}
+			}
+			else if (state == RECORDING_BOTTOMRIGHT)
+			{
+				if (fireState.currentState && fireState.changedSinceLastSync)
+				{
+					bottomright = aimState.pose.position;
+					state = PLAYING;
+					printf(
+						"Bottom right is (%.9f, %.9f, %.9f)\n",
+						bottomright.x,
+						bottomright.y,
+						bottomright.z
+					);
+				}
+			}
+			else
+			{
+				/* Quit */
+				if (fireState.currentState && pauseState.currentState)
+				{
+					run = 0;
+				}
 
-			/* TODO: run = 0 when fire and pedal are held for 3 seconds */
+				/* Buttons */
+				if (fireState.changedSinceLastSync)
+				{
+					printf("Fire %s\n", fireState.currentState ? "Press" : "Release");
+				}
+				if (pedalState.changedSinceLastSync)
+				{
+					printf("Pedal %s\n", pedalState.currentState ? "Press" : "Release");
+				}
+				if (pauseState.changedSinceLastSync)
+				{
+					printf("Pause %s\n", pauseState.currentState ? "Press" : "Release");
+				}
 
+				/* Pointer */
 #if 0
-			printf(
-				"State:\n"
-				"\tAim Position: (%.9f, %.9f, %.9f)\n"
-				"\tAim Orientation: (%.9f, %.9f, %.9f, %.9f)\n"
-				"\tFire: %d\n"
-				"\tPedal: %d\n"
-				"\tPause: %d\n",
-				aimState.pose.position.x,
-				aimState.pose.position.y,
-				aimState.pose.position.z,
-				aimState.pose.orientation.x,
-				aimState.pose.orientation.y,
-				aimState.pose.orientation.z,
-				aimState.pose.orientation.w,
-				fireState.currentState,
-				pedalState.currentState,
-				pauseState.currentState
-			);
+				XrVector3f direction;
+				float x, y, z;
+				x = 2 * (
+					(aimState.pose.orientation.y * aimState.pose.position.z) -
+					(aimState.pose.orientation.z * aimState.pose.position.y)
+				);
+				y = 2 * (
+					(aimState.pose.orientation.z * aimState.pose.position.x) -
+					(aimState.pose.orientation.x * aimState.pose.position.z)
+				);
+				z = 2 * (
+					(aimState.pose.orientation.x * aimState.pose.position.y) -
+					(aimState.pose.orientation.y * aimState.pose.position.x)
+				);
+				direction.x = (
+					aimState.pose.position.x +
+					(x * aimState.pose.orientation.w) +
+					(aimState.pose.orientation.y * z - aimState.pose.orientation.z * y)
+				);
+				direction.y = (
+					aimState.pose.position.y +
+					(y * aimState.pose.orientation.w) +
+					(aimState.pose.orientation.z * x - aimState.pose.orientation.x * z)
+				);
+				direction.z = (
+					aimState.pose.position.z +
+					(z * aimState.pose.orientation.w) +
+					(aimState.pose.orientation.x * y - aimState.pose.orientation.y * x)
+				);
+				printf(
+					"Pointer position: (%.9f, %.9f, %.9f)\n"
+					"Pointer direction: (%.9f, %.9f, %.9f)\n",
+					aimState.pose.position.x,
+					aimState.pose.position.y,
+					aimState.pose.position.z,
+					direction.x,
+					direction.y,
+					direction.z
+				);
 #endif
+
+				/* TODO: Haptic output */
+			}
 		}
 		else if (res == XR_SESSION_LOSS_PENDING)
 		{

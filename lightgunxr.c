@@ -47,6 +47,11 @@
  * For example, a pose pointing directly at the center of the rectangle will
  * evaluate to [0.5, 0.5].
  *
+ * The 4 points will always form a 2D rectangle - that is, the X/Z values of the
+ * left points and the X/Z values of the right points are always identical, and
+ * the Y values of the top points and the Y values of the bottom points are also
+ * always identical.
+ *
  * When the ray does NOT point at the rectangle (i.e. it's parallel to or facing
  * away from it) the result is discarded entirely.
  *

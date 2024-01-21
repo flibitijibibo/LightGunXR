@@ -40,6 +40,84 @@
 #define XR_USE_TIMESPEC
 #include <openxr/openxr_platform.h> /* xrConvertTimespecTimeToTimeKHR */
 
+/* Given a pose with position/orientation and a plane defined by two 3D points,
+ * a top left and bottom right, attempts to find where a ray casted by the pose
+ * intersects with the plane, then normalizes the result.
+ *
+ * For example, a pose pointing directly at the center of the plane will
+ * evaluate to [0.5, 0.5].
+ *
+ * When the ray does NOT point at the plane (i.e. it's parallel to or facing
+ * away from the plane) the result is discarded entirely.
+ *
+ * When the result is valid AND newer than the current values of mouseX/mouseY,
+ * the result is written to mouseX/mouseY and the function returns 1. Otherwise,
+ * the function returns 0 and it can be assumed that mouseX/mouseY are still
+ * valid.
+ */
+static int pose_to_pointer(
+	const XrPosef *pose,
+	const XrVector3f *topleft,
+	const XrVector3f *bottomright,
+	float *mouseX,
+	float *mouseY
+) {
+	/* Vector3.Transform(Quaternion) to get the pose's ray direction */
+	XrVector3f direction;
+	float x, y, z, resultX, resultY;
+	x = 2 * (
+		(pose->orientation.y * pose->position.z) -
+		(pose->orientation.z * pose->position.y)
+	);
+	y = 2 * (
+		(pose->orientation.z * pose->position.x) -
+		(pose->orientation.x * pose->position.z)
+	);
+	z = 2 * (
+		(pose->orientation.x * pose->position.y) -
+		(pose->orientation.y * pose->position.x)
+	);
+	direction.x = (
+		pose->position.x +
+		(x * pose->orientation.w) +
+		(pose->orientation.y * z - pose->orientation.z * y)
+	);
+	direction.y = (
+		pose->position.y +
+		(y * pose->orientation.w) +
+		(pose->orientation.z * x - pose->orientation.x * z)
+	);
+	direction.z = (
+		pose->position.z +
+		(z * pose->orientation.w) +
+		(pose->orientation.x * y - pose->orientation.y * x)
+	);
+
+	/* TODO */
+#if 0
+	printf(
+		"Pointer position: (%.9f, %.9f, %.9f)\n"
+		"Pointer direction: (%.9f, %.9f, %.9f)\n",
+		pose->position.x,
+		pose->position.y,
+		pose->position.z,
+		direction.x,
+		direction.y,
+		direction.z
+	);
+#endif
+	resultX = 0.0f;
+	resultY = 0.0f;
+
+	if ((resultX != *mouseX) || (resultY != *mouseY))
+	{
+		*mouseX = resultX;
+		*mouseY = resultY;
+		return 1;
+	}
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	/* "Global" variables */
@@ -313,6 +391,7 @@ int main(int argc, char **argv)
 	XrVector3f topleft, bottomright;
 
 	int run = 1;
+	float mouseX = 0, mouseY = 0;
 	XrActiveActionSet activeSet;
 	XrActionsSyncInfo syncInfo;
 	XrActionStateGetInfo getInfo;
@@ -416,47 +495,15 @@ int main(int argc, char **argv)
 				}
 
 				/* Pointer */
-#if 0
-				XrVector3f direction;
-				float x, y, z;
-				x = 2 * (
-					(aimState.pose.orientation.y * aimState.pose.position.z) -
-					(aimState.pose.orientation.z * aimState.pose.position.y)
-				);
-				y = 2 * (
-					(aimState.pose.orientation.z * aimState.pose.position.x) -
-					(aimState.pose.orientation.x * aimState.pose.position.z)
-				);
-				z = 2 * (
-					(aimState.pose.orientation.x * aimState.pose.position.y) -
-					(aimState.pose.orientation.y * aimState.pose.position.x)
-				);
-				direction.x = (
-					aimState.pose.position.x +
-					(x * aimState.pose.orientation.w) +
-					(aimState.pose.orientation.y * z - aimState.pose.orientation.z * y)
-				);
-				direction.y = (
-					aimState.pose.position.y +
-					(y * aimState.pose.orientation.w) +
-					(aimState.pose.orientation.z * x - aimState.pose.orientation.x * z)
-				);
-				direction.z = (
-					aimState.pose.position.z +
-					(z * aimState.pose.orientation.w) +
-					(aimState.pose.orientation.x * y - aimState.pose.orientation.y * x)
-				);
-				printf(
-					"Pointer position: (%.9f, %.9f, %.9f)\n"
-					"Pointer direction: (%.9f, %.9f, %.9f)\n",
-					aimState.pose.position.x,
-					aimState.pose.position.y,
-					aimState.pose.position.z,
-					direction.x,
-					direction.y,
-					direction.z
-				);
-#endif
+				if (pose_to_pointer(
+					&aimState.pose,
+					&topleft,
+					&bottomright,
+					&mouseX,
+					&mouseY
+				)) {
+					printf("Pointer: %.9f, %.9f\n", mouseX, mouseY);
+				}
 
 				/* TODO: Haptic output */
 			}

@@ -40,15 +40,15 @@
 #define XR_USE_TIMESPEC
 #include <openxr/openxr_platform.h> /* xrConvertTimespecTimeToTimeKHR */
 
-/* Given a pose with position/orientation and a plane defined by two 3D points,
- * a top left and bottom right, attempts to find where a ray casted by the pose
- * intersects with the plane, then normalizes the result.
+/* Given a pose with position/orientation and a rect defined by four 3D points,
+ * attempts to find where a ray casted by the pose intersects with the rect,
+ * then normalizes the result.
  *
- * For example, a pose pointing directly at the center of the plane will
+ * For example, a pose pointing directly at the center of the rectangle will
  * evaluate to [0.5, 0.5].
  *
- * When the ray does NOT point at the plane (i.e. it's parallel to or facing
- * away from the plane) the result is discarded entirely.
+ * When the ray does NOT point at the rectangle (i.e. it's parallel to or facing
+ * away from it) the result is discarded entirely.
  *
  * When the result is valid AND newer than the current values of mouseX/mouseY,
  * the result is written to mouseX/mouseY and the function returns 1. Otherwise,

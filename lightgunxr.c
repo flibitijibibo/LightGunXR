@@ -80,17 +80,20 @@ static int pose_to_pointer(
 	direction.x = (
 		pose->position.x +
 		(x * pose->orientation.w) +
-		(pose->orientation.y * z - pose->orientation.z * y)
+		(pose->orientation.y * z) -
+		(pose->orientation.z * y)
 	);
 	direction.y = (
 		pose->position.y +
 		(y * pose->orientation.w) +
-		(pose->orientation.z * x - pose->orientation.x * z)
+		(pose->orientation.z * x) -
+		(pose->orientation.x * z)
 	);
 	direction.z = (
 		pose->position.z +
 		(z * pose->orientation.w) +
-		(pose->orientation.x * y - pose->orientation.y * x)
+		(pose->orientation.x * y) -
+		(pose->orientation.y * x)
 	);
 
 	/* TODO */

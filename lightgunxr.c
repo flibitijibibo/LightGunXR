@@ -58,6 +58,8 @@
 static int pose_to_pointer(
 	const XrPosef *pose,
 	const XrVector3f *topleft,
+	const XrVector3f *topright,
+	const XrVector3f *bottomleft,
 	const XrVector3f *bottomright,
 	float *mouseX,
 	float *mouseY
@@ -391,7 +393,7 @@ int main(int argc, char **argv)
 		RECORDING_BOTTOMRIGHT,
 		PLAYING
 	} state = RECORDING_TOPLEFT;
-	XrVector3f topleft, bottomright;
+	XrVector3f topleft, bottomright, topright, bottomleft;
 
 	int run = 1;
 	float mouseX = 0, mouseY = 0;
@@ -466,6 +468,16 @@ int main(int argc, char **argv)
 				if (fireState.currentState && fireState.changedSinceLastSync)
 				{
 					bottomright = aimState.pose.position;
+
+					/* The remaining 2 points share with their left/right
+					 * counterparts, ensuring that the "TV" is always veritcally
+					 * flat
+					 */
+					bottomleft = topleft;
+					bottomleft.y = bottomright.y;
+					topright = bottomright;
+					topright.y = topleft.y;
+
 					state = PLAYING;
 					printf(
 						"Bottom right is (%.9f, %.9f, %.9f)\n",
@@ -501,6 +513,8 @@ int main(int argc, char **argv)
 				if (pose_to_pointer(
 					&aimState.pose,
 					&topleft,
+					&topright,
+					&bottomleft,
 					&bottomright,
 					&mouseX,
 					&mouseY

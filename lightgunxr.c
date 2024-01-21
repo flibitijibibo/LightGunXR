@@ -47,11 +47,6 @@
  * For example, a pose pointing directly at the center of the rectangle will
  * evaluate to [0.5, 0.5].
  *
- * The 4 points will always form a 2D rectangle - that is, the X/Z values of the
- * left points and the X/Z values of the right points are always identical, and
- * the Y values of the top points and the Y values of the bottom points are also
- * always identical.
- *
  * When the ray does NOT point at the rectangle (i.e. it's parallel to or facing
  * away from it) the result is discarded entirely.
  *
@@ -62,10 +57,11 @@
  */
 static int pose_to_pointer(
 	const XrPosef *pose,
-	const XrVector3f *topleft,
-	const XrVector3f *topright,
-	const XrVector3f *bottomleft,
-	const XrVector3f *bottomright,
+	const float *x0,
+	const float *x1,
+	const float *y0,
+	const float *y1,
+	const float *depth,
 	float *mouseX,
 	float *mouseY
 ) {
@@ -398,7 +394,7 @@ int main(int argc, char **argv)
 		RECORDING_BOTTOMRIGHT,
 		PLAYING
 	} state = RECORDING_TOPLEFT;
-	XrVector3f topleft, bottomright, topright, bottomleft;
+	float x0, x1, y0, y1, z;
 
 	int run = 1;
 	float mouseX = 0, mouseY = 0;
@@ -458,38 +454,22 @@ int main(int argc, char **argv)
 			{
 				if (fireState.currentState && fireState.changedSinceLastSync)
 				{
-					topleft = aimState.pose.position;
+					x0 = aimState.pose.position.x;
+					y0 = aimState.pose.position.y;
+					z = aimState.pose.position.z;
 					state = RECORDING_BOTTOMRIGHT;
-					printf(
-						"Top left is (%.9f, %.9f, %.9f)\n",
-						topleft.x,
-						topleft.y,
-						topleft.z
-					);
+					printf("Top left is (%.9f, %.9f, %.9f)\n", x0, y0, z);
 				}
 			}
 			else if (state == RECORDING_BOTTOMRIGHT)
 			{
 				if (fireState.currentState && fireState.changedSinceLastSync)
 				{
-					bottomright = aimState.pose.position;
-
-					/* The remaining 2 points share with their left/right
-					 * counterparts, ensuring that the "TV" is always veritcally
-					 * flat
-					 */
-					bottomleft = topleft;
-					bottomleft.y = bottomright.y;
-					topright = bottomright;
-					topright.y = topleft.y;
-
+					x1 = aimState.pose.position.x;
+					y1 = aimState.pose.position.y;
+					z = (z < aimState.pose.position.z) ? z : aimState.pose.position.z;
 					state = PLAYING;
-					printf(
-						"Bottom right is (%.9f, %.9f, %.9f)\n",
-						bottomright.x,
-						bottomright.y,
-						bottomright.z
-					);
+					printf("Bottom right is (%.9f, %.9f, %.9f)\n", x1, y1, z);
 				}
 			}
 			else
@@ -517,10 +497,11 @@ int main(int argc, char **argv)
 				/* Pointer */
 				if (pose_to_pointer(
 					&aimState.pose,
-					&topleft,
-					&topright,
-					&bottomleft,
-					&bottomright,
+					&x0,
+					&x1,
+					&y0,
+					&y1,
+					&z,
 					&mouseX,
 					&mouseY
 				)) {

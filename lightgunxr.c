@@ -33,13 +33,24 @@
 
 #include <openxr/openxr.h>
 #include <stdio.h> /* printf */
-#include <string.h> /* strncpy */
+#include <string.h> /* strncpy, memset */
 #include <unistd.h> /* usleep */
 #include <time.h> /* clock_gettime */
 #include <math.h> /* fabsf, fmodf, sqrtf, powf, cosf, asinf, M_PI */
 
 #define XR_USE_TIMESPEC
 #include <openxr/openxr_platform.h> /* xrConvertTimespecTimeToTimeKHR */
+
+#ifdef __linux__
+#include <linux/uinput.h>
+#include <errno.h>
+#include <fcntl.h> /* open, write */
+#else
+#error Only Linux is supported!
+#endif
+
+#define SCREEN_WIDTH 1920
+#define SCREEN_HEIGHT 1080
 
 /* Given a pose with position/orientation and a rect defined by four 3D points,
  * attempts to find where a ray casted by the pose intersects with the rect,
@@ -110,6 +121,10 @@ static int pose_to_pointer(
 	float resultX = ((pose->position.x - offX) - x0) / (x1 - x0);
 	float resultY = ((pose->position.y + offY) - y0) / (y1 - y0);
 
+	if (resultX < 0 || resultX > 1 || resultY < 0 || resultY > 1)
+	{
+		return 0;
+	}
 	if ((resultX != *mouseX) || (resultY != *mouseY))
 	{
 		*mouseX = resultX;
@@ -138,6 +153,58 @@ int main(int argc, char **argv)
 
 	XrResult res;
 	char resString[XR_MAX_RESULT_STRING_SIZE];
+
+	/* Platform setup */
+
+#ifdef __linux__
+	struct uinput_setup usetup;
+	struct uinput_abs_setup abssetup;
+	struct input_event ie;
+
+	int fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
+	if (fd == -1)
+	{
+		printf("uinput could not be opened\n");
+		return errno;
+	}
+
+	ioctl(fd, UI_SET_EVBIT, EV_KEY);
+	ioctl(fd, UI_SET_KEYBIT, KEY_Z);
+	ioctl(fd, UI_SET_KEYBIT, KEY_X);
+	ioctl(fd, UI_SET_KEYBIT, KEY_C);
+	ioctl(fd, UI_SET_KEYBIT, BTN_LEFT);
+
+	ioctl(fd, UI_SET_EVBIT, EV_ABS);
+	ioctl(fd, UI_SET_ABSBIT, ABS_X);
+	ioctl(fd, UI_SET_ABSBIT, ABS_Y);
+
+	ioctl(fd, UI_SET_EVBIT, EV_SYN);
+
+	memset(&usetup, '\0', sizeof(usetup));
+	usetup.id.bustype = BUS_USB;
+	usetup.id.vendor = 0x0420;
+	usetup.id.product = 0x6969;
+	strncpy(usetup.name, "Light Gun XR", sizeof(usetup.name));
+	ioctl(fd, UI_DEV_SETUP, &usetup);
+
+	abssetup.absinfo.value = 0;
+	abssetup.absinfo.minimum = 0;
+	abssetup.absinfo.fuzz = 0;
+	abssetup.absinfo.flat = 0;
+	abssetup.absinfo.resolution = 0;
+
+	abssetup.code = ABS_X;
+	abssetup.absinfo.maximum = SCREEN_WIDTH;
+	ioctl(fd, UI_ABS_SETUP, &abssetup);
+	abssetup.code = ABS_Y;
+	abssetup.absinfo.maximum = SCREEN_HEIGHT;
+	ioctl(fd, UI_ABS_SETUP, &abssetup);
+
+	ioctl(fd, UI_DEV_CREATE);
+
+	ie.time.tv_sec = 0;
+	ie.time.tv_usec = 0;
+#endif
 
 	/* Instance creation */
 
@@ -391,7 +458,7 @@ int main(int argc, char **argv)
 	} state = RECORDING_TOPLEFT;
 	float x0, x1, y0, y1, z;
 
-	int run = 1;
+	int run = 1, sync = 0;
 	float mouseX = 0, mouseY = 0;
 	XrActiveActionSet activeSet;
 	XrActionsSyncInfo syncInfo;
@@ -479,14 +546,35 @@ int main(int argc, char **argv)
 				if (fireState.changedSinceLastSync)
 				{
 					printf("Fire %s\n", fireState.currentState ? "Press" : "Release");
+#ifdef __linux__
+					ie.type = EV_KEY;
+					ie.code = BTN_LEFT;
+					ie.value = fireState.currentState;
+					write(fd, &ie, sizeof(ie));
+#endif
+					sync = 1;
 				}
 				if (pedalState.changedSinceLastSync)
 				{
 					printf("Pedal %s\n", pedalState.currentState ? "Press" : "Release");
+#ifdef __linux__
+					ie.type = EV_KEY;
+					ie.code = KEY_Z;
+					ie.value = pedalState.currentState;
+					write(fd, &ie, sizeof(ie));
+#endif
+					sync = 1;
 				}
 				if (pauseState.changedSinceLastSync)
 				{
 					printf("Pause %s\n", pauseState.currentState ? "Press" : "Release");
+#ifdef __linux__
+					ie.type = EV_KEY;
+					ie.code = KEY_C;
+					ie.value = pauseState.currentState;
+					write(fd, &ie, sizeof(ie));
+#endif
+					sync = 1;
 				}
 
 				/* Pointer */
@@ -500,7 +588,33 @@ int main(int argc, char **argv)
 					&mouseX,
 					&mouseY
 				)) {
-					printf("Pointer: %.9f, %.9f\n", mouseX, mouseY);
+					printf(
+						"Pointer: %.9f, %.9f\n",
+						mouseX * SCREEN_WIDTH,
+						mouseY * SCREEN_HEIGHT
+					);
+#ifdef __linux__
+					ie.type = EV_ABS;
+					ie.code = ABS_X;
+					ie.value = (int) (mouseX * SCREEN_WIDTH);
+					write(fd, &ie, sizeof(ie));
+					ie.type = EV_ABS;
+					ie.code = ABS_Y;
+					ie.value = (int) (mouseY * SCREEN_HEIGHT);
+					write(fd, &ie, sizeof(ie));
+#endif
+					sync = 1;
+				}
+
+				if (sync)
+				{
+#ifdef __linux__
+					ie.type = EV_SYN;
+					ie.code = SYN_REPORT;
+					ie.value = 0;
+					write(fd, &ie, sizeof(ie));
+#endif
+					sync = 0;
 				}
 
 				/* TODO: Haptic output */
@@ -523,6 +637,10 @@ int main(int argc, char **argv)
 	/* Clean up. We out. */
 	returnCode = 0;
 cleanup:
+#ifdef __linux__
+	ioctl(fd, UI_DEV_DESTROY);
+	close(fd);
+#endif
 	xrDestroySpace(aimSpace);
 	xrDestroySpace(baseSpace);
 	xrEndSession(session);

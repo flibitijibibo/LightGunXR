@@ -36,7 +36,7 @@
 #include <string.h> /* strncpy */
 #include <unistd.h> /* usleep */
 #include <time.h> /* clock_gettime */
-#include <math.h> /* fabsf, sqrtf, powf, cosf, asinf */
+#include <math.h> /* fabsf, fmodf, sqrtf, powf, cosf, asinf, M_PI */
 
 #define XR_USE_TIMESPEC
 #include <openxr/openxr_platform.h> /* xrConvertTimespecTimeToTimeKHR */
@@ -75,7 +75,6 @@ static int pose_to_pointer(
 			(pose->orientation.w * pose->orientation.y)
 		)
 	);
-	/* FIXME: Need to flip this around if the flat pitch is 180 */
 	float poseAngleY = atan2f(
 		2.0 * (
 			(pose->orientation.y * pose->orientation.z) +
@@ -88,6 +87,16 @@ static int pose_to_pointer(
 			(pose->orientation.z * pose->orientation.z)
 		)
 	);
+
+	/* flibit's setup starts pitch at +/- 180, flip it around... */
+	if (poseAngleY > 0)
+	{
+		poseAngleY -= M_PI;
+	}
+	else
+	{
+		poseAngleY += M_PI;
+	}
 
 	/* We have side A and angle A of a right triangle, get the length of side B */
 	float offX = sqrtf(powf(normalDistance / cosf(poseAngleX), 2) - (normalDistance * normalDistance));

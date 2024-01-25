@@ -36,7 +36,7 @@
 #include <string.h> /* strncpy */
 #include <unistd.h> /* usleep */
 #include <time.h> /* clock_gettime */
-#include <math.h> /* sqrtf, powf, cosf, acosf, asinf */
+#include <math.h> /* fabsf, sqrtf, powf, cosf, asinf */
 
 #define XR_USE_TIMESPEC
 #include <openxr/openxr_platform.h> /* xrConvertTimespecTimeToTimeKHR */
@@ -58,176 +58,48 @@
  */
 static int pose_to_pointer(
 	const XrPosef *pose,
-	const float *x0,
-	const float *x1,
-	const float *y0,
-	const float *y1,
-	const float *depth,
+	const float x0,
+	const float x1,
+	const float y0,
+	const float y1,
+	const float depth,
 	float *mouseX,
 	float *mouseY
 ) {
-	float tmpX, tmpY, tmpZ, tmpW;
+	float normalDistance = fabsf(pose->position.z - depth);
 
-	/* The vector from rect->pose is normal, get the vector's origin/distance */
-	XrVector3f normalOrigin;
-	float normalDistance;
-	normalOrigin.x = pose->position.x;
-	normalOrigin.y = pose->position.y;
-	normalOrigin.z = *depth;
-	normalDistance = normalOrigin.z - pose->position.z;
-
-	/* Matrix.CreateLookAt(posePosition, normalOrigin, Vector3(0, 1, 0)) */
-	float lookAt[4][4];
-	XrVector3f a, b, c, up;
-	up.x = 0.0f;
-	up.y = 1.0f;
-	up.z = 0.0f;
-	#define SUB(vec1, vec2, dst) \
-		dst.x = vec1.x - vec2.x; \
-		dst.y = vec1.y - vec2.y; \
-		dst.z = vec1.z - vec2.z;
-	#define NORMALIZE(vec) \
-		tmpX = 1.0f / sqrtf( \
-			(vec.x * vec.x) + \
-			(vec.y * vec.y) + \
-			(vec.z * vec.z) \
-		); \
-		vec.x = vec.x / tmpX; \
-		vec.y = vec.y / tmpX; \
-		vec.z = vec.z / tmpX;
-	#define CROSS(vec1, vec2, dst) \
-		tmpX = vec1.y * vec2.z - vec2.y * vec1.z; \
-		tmpY = -(vec1.x * vec2.z - vec2.x * vec1.z); \
-		tmpZ = vec1.x * vec2.y - vec2.x * vec1.y; \
-		dst.x = tmpX; \
-		dst.y = tmpY; \
-		dst.z = tmpZ;
-	SUB(pose->position, normalOrigin, a)
-	NORMALIZE(a)
-	CROSS(up, a, b)
-	NORMALIZE(b)
-	CROSS(a, b, c)
-	#undef CROSS
-	#undef NORMALIZE
-	#undef SUB
-	lookAt[0][0] = b.x;
-	lookAt[0][1] = c.x;
-	lookAt[0][2] = a.x;
-	lookAt[0][3] = 0.0f;
-	lookAt[1][0] = b.y;
-	lookAt[1][1] = c.y;
-	lookAt[1][2] = a.y;
-	lookAt[1][3] = 0.0f;
-	lookAt[2][0] = b.z;
-	lookAt[2][1] = c.z;
-	lookAt[2][2] = a.z;
-	lookAt[2][3] = 0.0f;
-	#define DOT(vec, pos) \
-		((vec.x * pos.x) + (vec.y * pos.y) + (vec.z * pos.z))
-	lookAt[3][0] = -DOT(b, pose->position);
-	lookAt[3][1] = -DOT(c, pose->position);
-	lookAt[3][2] = -DOT(a, pose->position);
-	#undef DOT
-	lookAt[3][3] = 1.0f;
-
-	/* FIXME: Do we need to decompose lookAt first? */
-
-	/* Quaternion.FromRotationMatrix(lookAt) */
-	XrQuaternionf normalOrientation;
-	float root, half;
-	float scale = lookAt[0][0] + lookAt[1][1] + lookAt[2][2];
-	if (scale > 0.0f)
-	{
-		root = sqrtf(scale + 1.0f);
-		half = 0.5f / root;
-
-		normalOrientation.x = (lookAt[1][2] - lookAt[2][1]) * half;
-		normalOrientation.y = (lookAt[2][0] - lookAt[0][2]) * half;
-		normalOrientation.z = (lookAt[0][1] - lookAt[1][0]) * half;
-		normalOrientation.w = root * 0.5f;
-	}
-	else if ((lookAt[0][0] >= lookAt[1][1]) && (lookAt[0][0] >= lookAt[2][2]))
-	{
-		root = sqrtf(1.0f + lookAt[0][0] - lookAt[1][1] - lookAt[2][2]);
-		half = 0.5f / root;
-
-		normalOrientation.x = 0.5f * root;
-		normalOrientation.y = (lookAt[0][1] + lookAt[1][0]) * half;
-		normalOrientation.z = (lookAt[0][2] + lookAt[2][0]) * half;
-		normalOrientation.w = (lookAt[1][2] - lookAt[2][1]) * half;
-	}
-	else if (lookAt[1][1] > lookAt[2][2])
-	{
-		root = sqrtf(1.0f + lookAt[1][1] - lookAt[0][0] - lookAt[2][2]);
-		half = 0.5f / root;
-
-		normalOrientation.x = (lookAt[1][0] + lookAt[0][1]) * half;
-		normalOrientation.y = 0.5f * root;
-		normalOrientation.z = (lookAt[2][1] + lookAt[1][2]) * half;
-		normalOrientation.w = (lookAt[2][0] - lookAt[0][2]) * half;
-	}
-	else
-	{
-		root = sqrtf(1.0f + lookAt[2][2] - lookAt[0][0] - lookAt[1][1]);
-		half = 0.5f / root;
-
-		normalOrientation.x = (lookAt[2][0] + lookAt[0][2]) * half;
-		normalOrientation.y = (lookAt[2][1] + lookAt[1][2]) * half;
-		normalOrientation.z = 0.5f * root;
-		normalOrientation.w = (lookAt[0][1] - lookAt[1][0]) * half;
-	}
-
-	/* Get the minimum rotation from the normal quaternion to the pose  */
-	XrQuaternionf deltaOrientation;
-	normalOrientation.x = -normalOrientation.x;
-	normalOrientation.y = -normalOrientation.y;
-	normalOrientation.z = -normalOrientation.z;
-	tmpX = (normalOrientation.y * pose->orientation.z) - (normalOrientation.z * pose->orientation.y);
-	tmpY = (normalOrientation.z * pose->orientation.x) - (normalOrientation.x * pose->orientation.z);
-	tmpZ = (normalOrientation.x * pose->orientation.y) - (normalOrientation.y * pose->orientation.x);
-	tmpW = (
-		(normalOrientation.x * pose->orientation.x) +
-		(normalOrientation.y * pose->orientation.y) +
-		(normalOrientation.z * pose->orientation.z)
+	/* Convert quaternion to pitch/yaw, we don't care about roll */
+	float poseAngleX = asinf(
+		-2.0 * (
+			(pose->orientation.x * pose->orientation.z) -
+			(pose->orientation.w * pose->orientation.y)
+		)
 	);
-	deltaOrientation.x = (
-		(normalOrientation.x * pose->orientation.w) +
-		(pose->orientation.x * normalOrientation.w) +
-		tmpX
+	/* FIXME: Need to flip this around if the flat pitch is 180 */
+	float poseAngleY = atan2f(
+		2.0 * (
+			(pose->orientation.y * pose->orientation.z) +
+			(pose->orientation.w * pose->orientation.x)
+		),
+		(
+			(pose->orientation.w * pose->orientation.w) -
+			(pose->orientation.x * pose->orientation.x) -
+			(pose->orientation.y * pose->orientation.y) +
+			(pose->orientation.z * pose->orientation.z)
+		)
 	);
-	deltaOrientation.y = (
-		(normalOrientation.y * pose->orientation.w) +
-		(pose->orientation.y * normalOrientation.w) +
-		tmpY
-	);
-	deltaOrientation.z = (
-		(normalOrientation.z * pose->orientation.w) +
-		(pose->orientation.z * normalOrientation.w) +
-		tmpZ
-	);
-	deltaOrientation.w = (normalOrientation.w * pose->orientation.w) - tmpW;
-
-	/* Convert the delta orientation to radians */
-	float poseAngleX, poseAngleY, theta, asintheta;
-	theta = acosf(deltaOrientation.w);
-	asintheta = asinf(theta);
-	poseAngleX = deltaOrientation.x * asintheta;
-	poseAngleY = deltaOrientation.y * asintheta;
-#if 0
-	printf(
-		"Angle: %f %f\n",
-		poseAngleX * 57.295779513082320876798154814105,
-		poseAngleY * 57.295779513082320876798154814105
-	);
-#endif
 
 	/* We have side A and angle A of a right triangle, get the length of side B */
 	float offX = sqrtf(powf(normalDistance / cosf(poseAngleX), 2) - (normalDistance * normalDistance));
 	float offY = sqrtf(powf(normalDistance / cosf(poseAngleY), 2) - (normalDistance * normalDistance));
 
+	/* Reintroduce the +/- attrib, the above values are always positive */
+	offX *= (poseAngleX > 0) - (poseAngleX < 0);
+	offY *= (poseAngleY > 0) - (poseAngleY < 0);
+
 	/* Add length of side B to pose->position, normalize result */
-	float resultX = ((pose->position.x + offX) - *x0) / (*x1 - *x0);
-	float resultY = ((pose->position.y + offY) - *y0) / (*y1 - *y0);
+	float resultX = ((pose->position.x - offX) - x0) / (x1 - x0);
+	float resultY = ((pose->position.y + offY) - y0) / (y1 - y0);
 
 	if ((resultX != *mouseX) || (resultY != *mouseY))
 	{
@@ -611,11 +483,11 @@ int main(int argc, char **argv)
 				/* Pointer */
 				if (pose_to_pointer(
 					&aimState.pose,
-					&x0,
-					&x1,
-					&y0,
-					&y1,
-					&z,
+					x0,
+					x1,
+					y0,
+					y1,
+					z,
 					&mouseX,
 					&mouseY
 				)) {
